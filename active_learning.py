@@ -16,19 +16,30 @@ from acq.ucb_scalarized import select_batch_ucb
 from candidates.enumerate_from_beneficials import enumerate_combinations
 
 class ActiveLearningLoop:
-    """
-    End-to-end orchestration of a single AL cycle.
-    """
     def __init__(
         self,
         template: StructuralTemplate,
         d_model: int = 256,
         device: str = "cpu",
+        esm_kwargs: Optional[Dict] = None,  # NEW
     ):
         self.device = torch.device(device)
         self.template = template
-        self.ligand_encoder = LigandMPNNEmbedder(d_model=d_model).to(self.device)
-        self.esm = ESMEmbedder(d_model=d_model).to(self.device)
+
+        # Structural encoder stays as you had it
+        self.ligand_encoder = LigandMPNNEncoder(d_model=d_model).to(self.device)
+
+        # Real ESM embedder (projects to d_model). You can override via esm_kwargs.
+        esm_kwargs = esm_kwargs or {}
+        self.esm = ESMEmbedder(
+            d_model=d_model,                        # project to fusion width
+            model_name=esm_kwargs.get("model_name", "esm2_t6_8M_UR50D"),
+            repr_layer=esm_kwargs.get("repr_layer", None),  # last by default
+            device=esm_kwargs.get("device", device),
+            fp16=esm_kwargs.get("fp16", False),
+            finetune=esm_kwargs.get("finetune", False),
+        )
+
         self.fuser = CrossAttentionFusion(d_model=d_model).to(self.device)
         self.surrogate = MultiTaskEnsemble(d_in=d_model, n_members=5, z_dim=0).to(self.device)
         self.diffuser = SidechainDiffusion(node_dim=d_model, num_atoms=6).to(self.device)
